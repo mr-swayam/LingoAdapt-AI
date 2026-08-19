@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+/* This app has one deliberate dark theme (bg-slate-950/text-slate-100 on
+ * <body> in app/layout.tsx) - it doesn't follow the OS light/dark
+ * preference. create-next-app's default light/dark `body { background:
+ * var(--background) }` boilerplate used to still live here, unlayered -
+ * Tailwind v4 emits its utility classes inside `@layer utilities`, and
+ * per the CSS Cascade Layers spec, ANY unlayered rule beats a layered one
+ * regardless of specificity or source order. That meant this leftover
+ * block was silently overriding body's actual Tailwind background/text
+ * classes on every page, whenever the browser's prefers-color-scheme
+ * wasn't "dark" - a real, live bug caught only by directly checking
+ * getComputedStyle() (the page still *looked* plausible in isolated
+ * screenshots taken with prefers-color-scheme: dark already active).
+ * Removed entirely - Tailwind's utilities are the only thing controlling
+ * body's colors now. */
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}

@@ -1,0 +1,44 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+frontend/.next/
+frontend/node_modules/
+*.tsbuildinfo
+npm-debug.log*
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+backend/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.claude/
+
+# Docker
+postgres-data/
+
+# Portable Redis-for-Windows distribution (downloaded by tools/start-redis-windows.ps1)
+tools/redis-windows/
+
+# Database dumps (tools/backup-postgres.ps1) - may contain real user data, never commit
+tools/backups/
