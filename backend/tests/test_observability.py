@@ -75,6 +75,23 @@ def test_settings_rejects_default_secret_key_in_production() -> None:
         )
 
 
+def test_settings_strips_whitespace_from_string_fields() -> None:
+    """Real incident (Phase 14, Railway deploy): a trailing newline ended
+    up inside DATABASE_URL's value via the host's environment-variable UI,
+    so psycopg tried to connect to a database literally named "railway\\n" -
+    which doesn't exist. str_strip_whitespace defends against this for
+    every string setting, not just the one that broke."""
+    settings = Settings(
+        database_url="postgresql+psycopg://user:pass@host:5432/railway\n",
+        secret_key="  a-real-random-secret\t",
+        cors_origins=" https://app.example.com ",
+        environment="development",
+    )
+    assert settings.database_url == "postgresql+psycopg://user:pass@host:5432/railway"
+    assert settings.secret_key == "a-real-random-secret"
+    assert settings.cors_origins == "https://app.example.com"
+
+
 def test_settings_rejects_localhost_cors_origin_in_production() -> None:
     with pytest.raises(ValidationError, match="CORS_ORIGINS still includes localhost"):
         Settings(

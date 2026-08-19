@@ -7,7 +7,15 @@ _DEFAULT_SECRET_KEY = "change-me-in-production"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # str_strip_whitespace: a real deployment (Phase 14, Railway) hit a
+    # trailing newline that ended up inside DATABASE_URL's value via its
+    # host's environment-variable UI - psycopg then tried to connect to a
+    # database literally named "railway\n", which doesn't exist. Stripping
+    # whitespace on every string field defends against this class of paste/
+    # editor artifact across every setting, not just the one that broke.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", str_strip_whitespace=True
+    )
 
     environment: str = "development"
     database_url: str = "postgresql+psycopg://lingoadapt:lingoadapt@localhost:5432/lingoadapt_dev"
