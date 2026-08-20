@@ -67,12 +67,28 @@ def get_current_admin_user(current_user: User = Depends(get_current_user)) -> Us
     return current_user
 
 
+def _get_client_ip(request: Request) -> str:
+    # Real bug found in production (Phase 14, Railway): request.client.host
+    # is the *proxy's* connecting IP, not the real client's, once this app
+    # sits behind any reverse proxy/load balancer - a live rate-limit test
+    # sent 11 requests from one machine and never got a 429, because each
+    # one apparently landed with a different request.client.host. Trusting
+    # the first hop of X-Forwarded-For is standard practice specifically
+    # for this deployment shape (this app is never exposed directly to the
+    # internet - Railway's edge always sets/overwrites this header, so a
+    # client can't spoof their way around the limit by forging it).
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def auth_rate_limit_gate(request: Request) -> None:
     """Applied to /auth/signup and /auth/login. A separate, overridable
     dependency (rather than inlined in the route) so tests can bypass it in
     bulk the same way they swap in FakeAIProvider - see tests/conftest.py -
     while tests/test_rate_limiting.py exercises the real thing."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     allowed = check_rate_limit(
         f"ratelimit:auth:{client_ip}",
         limit=AUTH_RATE_LIMIT_PER_MINUTE,

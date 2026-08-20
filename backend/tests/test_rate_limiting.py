@@ -8,6 +8,7 @@ of the suite bypasses it.
 """
 
 import redis
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -15,12 +16,45 @@ from app.ai.factory import get_ai_provider
 from app.api.deps import (
     AI_RATE_LIMIT_PER_HOUR,
     AUTH_RATE_LIMIT_PER_MINUTE,
+    _get_client_ip,
 )
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.rate_limit import check_rate_limit
 from app.main import app
 from tests.ai_fixtures import FakeAIProvider
+
+
+def _fake_request(*, headers: dict[str, str], client_host: str | None = "1.2.3.4") -> Request:
+    scope = {
+        "type": "http",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": (client_host, 12345) if client_host else None,
+    }
+    return Request(scope)
+
+
+def test_get_client_ip_prefers_x_forwarded_for() -> None:
+    """Real bug found in production (Phase 14): request.client.host is the
+    reverse proxy's own connecting IP once this app is deployed behind one
+    (Railway), not the real client's - a live rate-limit test sent 11
+    requests from one machine and never got a 429, because each apparently
+    landed with a different request.client.host. X-Forwarded-For is what
+    reverse proxies set to the real client IP."""
+    request = _fake_request(
+        headers={"x-forwarded-for": "203.0.113.7, 10.0.0.1"}, client_host="10.0.0.99"
+    )
+    assert _get_client_ip(request) == "203.0.113.7"
+
+
+def test_get_client_ip_falls_back_to_request_client_without_the_header() -> None:
+    request = _fake_request(headers={}, client_host="10.0.0.99")
+    assert _get_client_ip(request) == "10.0.0.99"
+
+
+def test_get_client_ip_handles_missing_client_and_header() -> None:
+    request = _fake_request(headers={}, client_host=None)
+    assert _get_client_ip(request) == "unknown"
 
 
 class _FakeRedis:
