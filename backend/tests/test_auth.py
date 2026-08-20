@@ -1,4 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
+
+from app.api.v1 import auth as auth_module
 
 
 def _signup_payload(email: str = "learner@example.com") -> dict:
@@ -134,3 +137,30 @@ def test_logout_revokes_refresh_token(client: TestClient) -> None:
 
     refresh_response = client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 401
+
+
+def test_refresh_cookie_is_samesite_none_in_production(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real incident (Phase 14): SameSite=Lax cookies are never sent on
+    cross-site fetch()/XHR calls, only top-level navigations - invisible in
+    local dev (frontend/backend share "localhost", which counts as
+    same-site) but breaks session persistence the moment frontend and
+    backend are deployed to different domains (Vercel + Railway). Production
+    needs SameSite=None (paired with Secure, which browsers require)."""
+    monkeypatch.setattr(auth_module.settings, "environment", "production")
+
+    response = client.post("/api/v1/auth/signup", json=_signup_payload("prod-cookie@example.com"))
+
+    set_cookie = response.headers.get("set-cookie")
+    assert set_cookie is not None
+    assert "samesite=none" in set_cookie.lower()
+    assert "secure" in set_cookie.lower()
+
+
+def test_refresh_cookie_is_samesite_lax_in_development(client: TestClient) -> None:
+    response = client.post("/api/v1/auth/signup", json=_signup_payload())
+
+    set_cookie = response.headers.get("set-cookie")
+    assert set_cookie is not None
+    assert "samesite=lax" in set_cookie.lower()

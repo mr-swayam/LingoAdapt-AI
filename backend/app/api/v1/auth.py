@@ -19,12 +19,24 @@ _INVALID_REFRESH_TOKEN = HTTPException(
 
 
 def _set_refresh_cookie(response: Response, raw_refresh_token: str) -> None:
+    # SameSite=Lax cookies are never sent on cross-site fetch()/XHR calls -
+    # only on top-level navigations. That's invisible in local dev (frontend
+    # and backend are different ports of the same "localhost" site, which
+    # counts as same-site), but breaks silently the moment frontend and
+    # backend are deployed to different domains (Vercel + Railway, a real
+    # Phase 14 production deploy) - login succeeds, but every subsequent
+    # page's silent refresh-token call carries no cookie, so the session
+    # never survives a fresh page load. SameSite=None (which browsers
+    # require pairing with Secure) is what actually works cross-site;
+    # Lax is kept for local development since it doesn't need cross-site
+    # cookies and staying stricter there is free security margin.
+    is_production_like = settings.environment != "development"
     response.set_cookie(
         key=_REFRESH_COOKIE_NAME,
         value=raw_refresh_token,
         httponly=True,
-        secure=settings.environment != "development",
-        samesite="lax",
+        secure=is_production_like,
+        samesite="none" if is_production_like else "lax",
         path=_REFRESH_COOKIE_PATH,
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
     )
