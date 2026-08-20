@@ -1,0 +1,43 @@
+name: Backup Production Database
+
+# Phase 14 Step 12: scheduled Postgres backup, no new infrastructure - runs
+# on GitHub's own runners, stores the dump as a workflow artifact (GitHub
+# retains it for `retention-days`, then auto-deletes it - that's this
+# project's backup-retention policy for now, revisit if/when a real object
+# store makes sense).
+#
+# Uses a matching postgres:18-alpine image to run pg_dump rather than
+# whatever client version ubuntu-latest's package repo happens to carry -
+# pg_dump refuses to dump from a newer server than itself, and this was
+# hit for real running the Phase 14 restore drill locally (production is
+# Postgres 18; this machine's installed client was 17).
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump production database
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PROD_DATABASE_URL repository secret is not set - see DEPLOYMENT_RUNBOOK.md Step 12." >&2
+            exit 1
+          fi
+          mkdir -p backups
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          docker run --rm -v "$PWD/backups:/backups" postgres:18-alpine \
+            pg_dump --format=custom --file="/backups/prod-${TIMESTAMP}.dump" "$DATABASE_URL"
+          ls -la backups/
+
+      - name: Upload backup as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-backup-${{ github.run_id }}
+          path: backups/*.dump
+          retention-days: 30
