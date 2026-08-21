@@ -4,9 +4,10 @@ from datetime import datetime
 
 from sqlalchemy import CheckConstraint, Enum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import TZ_DATETIME, Base
+from app.models.course import Skill  # noqa: F401 - referenced by string in relationship()
 
 
 class DetectedErrorType(enum.StrEnum):
@@ -69,6 +70,11 @@ class DetectedError(Base):
     created_at: Mapped[datetime] = mapped_column(
         TZ_DATETIME, server_default=func.now(), nullable=False, index=True
     )
+
+    # V3.3 Mistake Notebook: lets mistake_service render a skill_name
+    # without a second query - skill_id was already a real FK column, this
+    # just names the ORM relationship over it for the first time.
+    skill: Mapped["Skill"] = relationship()
 
     __table_args__ = (
         CheckConstraint(

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.learner_model import LearningEvent, LearningEventType, SkillMastery
@@ -109,6 +109,27 @@ def count_recent_incorrect(
         LearningEvent.is_correct.is_(False),
     )
     return int(db.execute(stmt).scalar_one())
+
+
+def get_skill_accuracy_in_window(
+    db: Session, *, user_id: uuid.UUID, skill_id: uuid.UUID, start: datetime, end: datetime
+) -> tuple[int, int]:
+    """(correct_count, total_count) among this user's LearningEvents for one
+    skill in [start, end) - the per-skill windowed building block for
+    learner_insight_service.get_improving_skills's recent-vs-previous
+    accuracy comparison (V3.1/V3.2). Same explicit-bounds style as
+    analytics_repository's _utc_day_bounds queries, not func.date(...)."""
+    stmt = select(
+        func.count(),
+        func.sum(case((LearningEvent.is_correct.is_(True), 1), else_=0)),
+    ).where(
+        LearningEvent.user_id == user_id,
+        LearningEvent.skill_id == skill_id,
+        LearningEvent.created_at >= start,
+        LearningEvent.created_at < end,
+    )
+    total, correct = db.execute(stmt).one()
+    return int(correct or 0), int(total or 0)
 
 
 def get_missed_exercise_ids(

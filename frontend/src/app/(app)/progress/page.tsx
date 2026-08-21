@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Card } from "@/components/ui/Card";
@@ -167,6 +168,12 @@ export default function ProgressPage() {
                 </li>
               ))}
             </ul>
+            <Link
+              href="/mistakes"
+              className="mt-4 inline-block text-sm font-medium text-cyan-400 hover:text-cyan-300"
+            >
+              View Mistake Notebook →
+            </Link>
           </Card>
         )}
 

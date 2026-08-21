@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from app.models.course import Exercise
 from app.models.practice import PracticeSession, PracticeSessionStatus
@@ -54,6 +54,23 @@ class PracticeStartResponse(BaseModel):
                 if ex.id in reasons
             },
         )
+
+
+class PracticeAgainRequest(BaseModel):
+    """V3.3 "Practice Again" - exactly one of the two, matching the two
+    honestly-distinct actions the Mistake Notebook offers: `skill_id`
+    ("Practice this skill again", offered on a repeated-difficulty group)
+    or `exercise_id` ("Retry this exercise", offered on a repeated-exact-
+    mistake group or any single mistake card)."""
+
+    skill_id: uuid.UUID | None = None
+    exercise_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_target(self) -> "PracticeAgainRequest":
+        if (self.skill_id is None) == (self.exercise_id is None):
+            raise ValueError("Provide exactly one of skill_id or exercise_id")
+        return self
 
 
 class PracticeAnswerRequest(BaseModel):

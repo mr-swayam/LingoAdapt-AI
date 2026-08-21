@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AchievementCard } from "@/components/gamification/AchievementCard";
@@ -14,28 +15,39 @@ import { ProgressRing } from "@/components/ui/ProgressRing";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { listCourses } from "@/lib/course-api";
+import { ApiError, getDailyPlan } from "@/lib/daily-plan-api";
 import { getQuests } from "@/lib/gamification-api";
 import { LEAGUE_TIER_ICONS, LEAGUE_TIER_LABELS } from "@/lib/league-labels";
-import { getMastery, getReviewQueue } from "@/lib/mastery-api";
+import { practiceAgain } from "@/lib/practice-api";
 import { getProgress } from "@/lib/progress-api";
+import { reasonLabel } from "@/lib/reason-label";
 import type { CourseSummary } from "@/types/course";
+import type { DailyPlan, DailyPlanTask } from "@/types/daily-plan";
 import type { Quest } from "@/types/gamification";
-import type { ReviewItem, SkillMastery } from "@/types/mastery";
 import type { Progress } from "@/types/progress";
+
+const TASK_ICON: Record<DailyPlanTask["task_type"], string> = {
+  REVIEW: "🔁",
+  PRACTICE: "🎯",
+  LESSON: "📘",
+};
 
 /** The learning "command center" - prioritizes one clear next action
  * (continue the current lesson) instead of the previous 9-equal-weight
- * card stack, and surfaces review-due/weakest-skill using data that was
- * already available via /me/review and /me/mastery but wasn't shown here
- * before. Every number on this page comes from a real API response -
- * nothing here is a placeholder or invented statistic. */
+ * card stack. "Today's Plan" (V3.2) replaces the old separate Review-due
+ * and Recommended-for-you cards with one unified, ordered list from the
+ * same real backend priority logic - no two cards silently disagreeing
+ * about what to do next. Every number on this page comes from a real API
+ * response - nothing here is a placeholder or invented statistic. */
 export default function DashboardPage() {
   const { status, user, accessToken } = useRequireAuth();
+  const router = useRouter();
   const [course, setCourse] = useState<CourseSummary | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [quests, setQuests] = useState<Quest[] | null>(null);
-  const [reviewQueue, setReviewQueue] = useState<ReviewItem[] | null>(null);
-  const [weakestSkill, setWeakestSkill] = useState<SkillMastery | null>(null);
+  const [dailyPlan, setDailyPlan] = useState<DailyPlan | null>(null);
+  const [pendingTaskKey, setPendingTaskKey] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
 
   useEffect(() => {
     if (status !== "authenticated" || !accessToken) return;
@@ -48,20 +60,29 @@ export default function DashboardPage() {
     getQuests(accessToken)
       .then(setQuests)
       .catch(() => setQuests(null));
-    getReviewQueue(accessToken)
-      .then(setReviewQueue)
-      .catch(() => setReviewQueue([]));
-    getMastery(accessToken)
-      .then((skills) => {
-        const practiced = skills.filter((s) => s.attempt_count > 0);
-        setWeakestSkill(
-          practiced.length > 0
-            ? practiced.reduce((weakest, s) => (s.mastery < weakest.mastery ? s : weakest))
-            : null,
-        );
-      })
-      .catch(() => setWeakestSkill(null));
+    getDailyPlan(accessToken)
+      .then(setDailyPlan)
+      .catch(() => setDailyPlan(null));
   }, [status, accessToken]);
+
+  async function handleTaskAction(task: DailyPlanTask) {
+    if (!accessToken) return;
+    const key = `${task.task_type}:${task.skill_id ?? task.lesson_id}`;
+    if (task.task_type === "LESSON") {
+      if (task.lesson_id) router.push(`/learn/${task.lesson_id}`);
+      return;
+    }
+    if (!task.skill_id) return;
+    setPendingTaskKey(key);
+    setTaskError(null);
+    try {
+      await practiceAgain({ skillId: task.skill_id }, accessToken);
+      router.push("/practice");
+    } catch (err) {
+      setTaskError(err instanceof ApiError ? err.message : "Couldn't start that task.");
+      setPendingTaskKey(null);
+    }
+  }
 
   if (status !== "authenticated" || !user) {
     return (
@@ -153,44 +174,83 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {reviewQueue && reviewQueue.length > 0 && (
-            <Card>
-              <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-amber-300">
-                Review due
-              </h2>
-              <p className="text-sm text-slate-400">
-                {reviewQueue.length} skill{reviewQueue.length === 1 ? "" : "s"} ready for review.
-              </p>
-              <ul className="mt-3 flex flex-col gap-1 text-sm text-slate-200">
-                {reviewQueue.slice(0, 3).map((item) => (
-                  <li key={item.skill_code}>{item.skill_name}</li>
-                ))}
-              </ul>
-              <Link href="/progress" className="mt-4 inline-block text-sm font-medium text-cyan-400 hover:text-cyan-300">
-                View progress →
-              </Link>
-            </Card>
-          )}
+        {dailyPlan && dailyPlan.tasks.length > 0 && (
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Today&rsquo;s plan
+            </h2>
+            <div className="flex flex-col gap-2">
+              {dailyPlan.tasks.map((task) => {
+                const key = `${task.task_type}:${task.skill_id ?? task.lesson_id}`;
+                const label =
+                  task.task_type === "LESSON"
+                    ? `Continue: ${task.lesson_title}`
+                    : task.reason
+                      ? reasonLabel(task.reason)
+                      : (task.skill_name ?? "");
+                return (
+                  <div
+                    key={key}
+                    className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 ${
+                      task.completed
+                        ? "border-emerald-900 bg-emerald-950/20"
+                        : "border-slate-800 bg-slate-900/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 text-sm">
+                      <span aria-hidden>{task.completed ? "✅" : TASK_ICON[task.task_type]}</span>
+                      <span className={task.completed ? "text-slate-400 line-through" : "text-slate-200"}>
+                        {label}
+                      </span>
+                    </div>
+                    {!task.completed && (
+                      <button
+                        type="button"
+                        onClick={() => handleTaskAction(task)}
+                        disabled={pendingTaskKey === key}
+                        className="shrink-0 rounded-lg border border-cyan-700 px-3 py-1 text-xs font-semibold text-cyan-300 transition-colors duration-standard hover:bg-cyan-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {pendingTaskKey === key ? "Starting…" : task.task_type === "LESSON" ? "Go" : "Practice"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {taskError && <p className="mt-3 text-xs text-red-300">{taskError}</p>}
+          </Card>
+        )}
 
-          {weakestSkill && (
-            <Card>
-              <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Recommended for you
-              </h2>
-              <p className="text-sm text-slate-400">
-                Your weakest skill is{" "}
-                <span className="text-slate-200">{weakestSkill.skill_name}</span> at{" "}
-                {Math.round(weakestSkill.mastery)}%.
-              </p>
-              <Link
-                href="/practice"
-                className="mt-4 inline-block rounded-lg border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-300 transition-colors duration-standard hover:bg-cyan-950/40"
-              >
-                Practice now
-              </Link>
-            </Card>
-          )}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card variant="interactive">
+            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              AI Coach
+            </h2>
+            <p className="text-sm text-slate-400">
+              A grounded read on how you&rsquo;re doing, based on your real activity.
+            </p>
+            <Link
+              href="/coach"
+              className="mt-4 inline-block rounded-lg border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-300 transition-colors duration-standard hover:bg-cyan-950/40"
+            >
+              View insight
+            </Link>
+          </Card>
+
+          <Card variant="interactive">
+            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Mistake Notebook
+            </h2>
+            <p className="text-sm text-slate-400">
+              Review what you&rsquo;ve gotten wrong in lessons, practice, and tutor conversations.
+            </p>
+            <Link
+              href="/mistakes"
+              className="mt-4 inline-block rounded-lg border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-300 transition-colors duration-standard hover:bg-cyan-950/40"
+            >
+              Review mistakes
+            </Link>
+          </Card>
 
           {quests && quests.length > 0 && (
             <Card>

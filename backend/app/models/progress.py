@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import TZ_DATETIME, Base
+from app.models.course import Exercise  # noqa: F401 - referenced by string in relationship()
 
 
 class LessonAttemptStatus(enum.StrEnum):
@@ -74,6 +75,11 @@ class ExerciseAttempt(Base):
     )
 
     lesson_attempt: Mapped["LessonAttempt"] = relationship(back_populates="exercise_attempts")
+    # V3.3 Mistake Notebook: lets mistake_repository eager-load the exercise
+    # (and, via Exercise.skill, the skill) in one query instead of an N+1 -
+    # exercise_id was already a real FK column, this just names the ORM
+    # relationship over it for the first time.
+    exercise: Mapped["Exercise"] = relationship()
 
     __table_args__ = (
         UniqueConstraint(

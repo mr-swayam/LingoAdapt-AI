@@ -8,6 +8,7 @@ from app.api.deps import get_current_user, get_metered_ai_provider
 from app.core.db import get_db
 from app.models.user import User
 from app.schemas.practice import (
+    PracticeAgainRequest,
     PracticeAnswerRequest,
     PracticeAnswerResult,
     PracticeAudioAnswerResult,
@@ -38,6 +39,16 @@ def _handle_practice_service_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This exercise is not part of the given practice session",
         )
+    if isinstance(exc, practice_service.NoTargetedExercisesFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No matching exercises were found to practice",
+        )
+    if isinstance(exc, practice_service.ExerciseNotOwnedMistakeError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This exercise is not one of your past mistakes",
+        )
     raise exc
 
 
@@ -48,6 +59,29 @@ def start_practice(
     session, exercises, reasons = practice_service.start_practice_session(
         db, user_id=current_user.id
     )
+    return PracticeStartResponse.build(session, exercises, reasons)
+
+
+@router.post("/practice-again", response_model=PracticeStartResponse)
+def practice_again(
+    payload: PracticeAgainRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PracticeStartResponse:
+    """V3.3 Mistake Notebook's "Practice Again" - see practice_service.
+    start_targeted_practice_session for the skill_id vs exercise_id
+    distinction and the ownership check on exercise_id."""
+    skill_ids = [payload.skill_id] if payload.skill_id is not None else None
+    exercise_ids = [payload.exercise_id] if payload.exercise_id is not None else None
+    try:
+        session, exercises, reasons = practice_service.start_targeted_practice_session(
+            db, user_id=current_user.id, skill_ids=skill_ids, exercise_ids=exercise_ids
+        )
+    except (
+        practice_service.NoTargetedExercisesFoundError,
+        practice_service.ExerciseNotOwnedMistakeError,
+    ) as exc:
+        raise _handle_practice_service_error(exc) from exc
     return PracticeStartResponse.build(session, exercises, reasons)
 
 

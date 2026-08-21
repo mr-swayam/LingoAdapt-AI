@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import TZ_DATETIME, Base
+from app.models.course import Exercise  # noqa: F401 - referenced by string in relationship()
 
 
 class PracticeSessionStatus(enum.StrEnum):
@@ -78,6 +79,10 @@ class PracticeQuestion(Base):
     answered_at: Mapped[datetime | None] = mapped_column(TZ_DATETIME, nullable=True)
 
     session: Mapped["PracticeSession"] = relationship(back_populates="questions")
+    # V3.3 Mistake Notebook: same rationale as ExerciseAttempt.exercise in
+    # app/models/progress.py - names the ORM relationship over the
+    # already-existing exercise_id FK for the first time.
+    exercise: Mapped["Exercise"] = relationship()
 
     __table_args__ = (
         UniqueConstraint(

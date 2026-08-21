@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  practiceAgain,
   startPractice,
   submitPracticeAnswer,
   submitPracticeAnswerAudio,
@@ -57,5 +58,33 @@ describe("practice-api", () => {
     expect(url).toContain("/practice/session-1/answer-audio");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
+  });
+
+  it("practiceAgain sends skill_id when targeting a skill", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ practice_session_id: "s2", total_count: 1, exercises: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await practiceAgain({ skillId: "skill-1" }, "tok123");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/practice/practice-again");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ skill_id: "skill-1" });
+  });
+
+  it("practiceAgain sends exercise_id when targeting an exact exercise", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ practice_session_id: "s3", total_count: 1, exercises: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await practiceAgain({ exerciseId: "ex-1" }, "tok123");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ exercise_id: "ex-1" });
   });
 });

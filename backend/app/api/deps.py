@@ -27,6 +27,14 @@ AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
 AI_RATE_LIMIT_PER_HOUR = 30
 AI_RATE_LIMIT_WINDOW_SECONDS = 3600
 
+# V3.1 AI Coach manual "Refresh" - a second, tighter, feature-specific limit
+# on top of (not instead of) AI_RATE_LIMIT_PER_HOUR above (V3 architecture
+# review item 15). GET /me/coach itself is unmetered (cache hits and the
+# insufficient-data short-circuit cost nothing) - only an explicit refresh,
+# which always bypasses the cache, is gated here.
+COACH_REFRESH_LIMIT = 1
+COACH_REFRESH_WINDOW_SECONDS = 300
+
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 _CREDENTIALS_ERROR = HTTPException(
@@ -114,6 +122,22 @@ def ai_rate_limit_gate(current_user: User = Depends(get_current_user)) -> None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="AI usage limit reached for this hour. Please try again later.",
+        )
+
+
+def coach_refresh_rate_limit_gate(current_user: User = Depends(get_current_user)) -> None:
+    """Applied only to the explicit Coach "Refresh" action - a normal
+    GET /me/coach is not gated by this at all (cache hits/insufficient-data
+    responses cost nothing to serve)."""
+    allowed = check_rate_limit(
+        f"ratelimit:coach-refresh:{current_user.id}",
+        limit=COACH_REFRESH_LIMIT,
+        window_seconds=COACH_REFRESH_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Please wait a few minutes before refreshing your coach insight again.",
         )
 
 

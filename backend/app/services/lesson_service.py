@@ -8,7 +8,7 @@ from app.ai.base import AIProvider
 from app.models.course import ExerciseType, Lesson
 from app.models.progress import ExerciseAttempt, LessonAttempt, LessonAttemptStatus
 from app.repositories import course_repository, progress_repository
-from app.services import ai_grading, gamification_service, learner_model_service
+from app.services import ai_grading, coach_service, gamification_service, learner_model_service
 from app.services.grading import grade_exercise
 
 
@@ -156,6 +156,12 @@ async def submit_answer(
         if answered_count >= attempt.total_count:
             attempt.status = LessonAttemptStatus.COMPLETED
             attempt.completed_at = datetime.now(UTC)
+            # V3.1 Coach cache invalidation (architecture review item 14):
+            # a lesson completing is one of this app's two real "meaningful
+            # activity" checkpoints - see coach_service.invalidate_coach_
+            # cache's docstring for why this granularity (not per-answer)
+            # was chosen.
+            coach_service.invalidate_coach_cache(user_id)
 
     lesson_completed = attempt.status == LessonAttemptStatus.COMPLETED
 

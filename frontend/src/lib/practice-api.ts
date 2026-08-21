@@ -12,6 +12,22 @@ export function startPractice(accessToken: string): Promise<PracticeStartRespons
   return apiRequest("/practice/start", { method: "POST", accessToken });
 }
 
+/** V3.3 "Practice Again" - exactly one target. Creates/replaces the
+ * learner's in-progress practice session, so a subsequent startPractice()
+ * call (e.g. on the /practice page) resumes this same targeted session. */
+export function practiceAgain(
+  target: { skillId: string } | { exerciseId: string },
+  accessToken: string,
+): Promise<PracticeStartResponse> {
+  const body =
+    "skillId" in target ? { skill_id: target.skillId } : { exercise_id: target.exerciseId };
+  return apiRequest("/practice/practice-again", {
+    method: "POST",
+    accessToken,
+    body: JSON.stringify(body),
+  });
+}
+
 export function submitPracticeAnswer(
   sessionId: string,
   exerciseId: string,
