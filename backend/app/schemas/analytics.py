@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.models.analytics import AiCallOperation
 from app.models.evaluation import DetectedErrorType
-from app.services.analytics_service import AnalyticsOverview
+from app.services.analytics_service import AnalyticsOverview, LearnerActivity
 
 
 class DailyActiveUsersPointOut(BaseModel):
@@ -53,6 +53,43 @@ class WeeklyCorrectnessPointOut(BaseModel):
     correct: int
     total: int
     accuracy: float
+
+
+class LearnerActivityOut(BaseModel):
+    """Real, learner-scoped activity for the redesigned /progress page -
+    every field traces to a real query, no placeholder metrics."""
+
+    lesson_completion: CompletionStatsOut
+    practice_completion: CompletionStatsOut
+    accuracy_trend: list[WeeklyCorrectnessPointOut]
+
+    @classmethod
+    def from_activity(cls, activity: LearnerActivity) -> "LearnerActivityOut":
+        return cls(
+            lesson_completion=CompletionStatsOut(
+                started=activity.lesson_completion.started,
+                completed=activity.lesson_completion.completed,
+                completion_rate=_rate(
+                    activity.lesson_completion.completed, activity.lesson_completion.started
+                ),
+            ),
+            practice_completion=CompletionStatsOut(
+                started=activity.practice_completion.started,
+                completed=activity.practice_completion.completed,
+                completion_rate=_rate(
+                    activity.practice_completion.completed, activity.practice_completion.started
+                ),
+            ),
+            accuracy_trend=[
+                WeeklyCorrectnessPointOut(
+                    week_start=p.week_start,
+                    correct=p.correct,
+                    total=p.total,
+                    accuracy=_rate(p.correct, p.total),
+                )
+                for p in activity.accuracy_trend
+            ],
+        )
 
 
 class AnalyticsOverviewOut(BaseModel):

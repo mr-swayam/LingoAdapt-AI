@@ -1,5 +1,14 @@
 import type { Exercise } from "@/types/course";
 
+/** Real recommendation signals (recommendation.SkillCandidate, threaded
+ * through instead of discarded) - never a fabricated explanation. */
+export type PracticeReason = {
+  skill_name: string;
+  mastery: number;
+  is_review_due: boolean;
+  recent_incorrect_count: number;
+};
+
 export type PracticeStartResponse = {
   practice_session_id: string;
   status: "IN_PROGRESS" | "COMPLETED";
@@ -7,6 +16,7 @@ export type PracticeStartResponse = {
   correct_count: number;
   answered_exercise_ids: string[];
   exercises: Exercise[];
+  reasons: Record<string, PracticeReason>;
 };
 
 export type PracticeAnswerResult = {

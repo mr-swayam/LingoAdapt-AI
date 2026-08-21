@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PrimaryButton, TextArea, TextInput } from "@/components/ui/form";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
@@ -9,7 +9,7 @@ import type { ExerciseFeedback, Exercise } from "@/types/course";
 
 function optionClasses(state: "idle" | "selected" | "correct" | "incorrect" | "reveal-correct") {
   const base =
-    "w-full rounded-lg border px-4 py-3 text-left text-sm transition-colors disabled:cursor-not-allowed";
+    "w-full rounded-lg border px-4 py-3 text-left text-sm transition-colors duration-standard disabled:cursor-not-allowed";
   switch (state) {
     case "correct":
       return `${base} border-emerald-500 bg-emerald-500/10 text-emerald-300`;
@@ -244,45 +244,107 @@ export function SpeakingAnswer({
   );
 }
 
+export type ListeningPlayerState = "loading" | "idle" | "playing" | "error";
+
+/** Fetches the exercise's dictation audio in the background but does NOT
+ * auto-play it - the learner must press Listen. Auto-playing the instant
+ * the exercise loaded (the old behavior) had zero user gesture behind it,
+ * which is exactly the "unexpected autoplay" pattern this feature must
+ * avoid, and is unreliable on mobile browsers that block gesture-less
+ * audio outright. */
 export function ListeningAudioPlayer({
   exerciseId,
   accessToken,
+  onStateChange,
 }: {
   exerciseId: string;
   accessToken: string;
+  onStateChange?: (state: ListeningPlayerState) => void;
 }) {
   // No re-fetch-on-change reset needed: the caller (ExerciseRenderer) is
   // remounted with key={exercise.id} whenever the exercise changes, so a
   // new exercise always means a fresh mount with fresh initial state here.
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<ListeningPlayerState>("loading");
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  function updateState(next: ListeningPlayerState) {
+    setState(next);
+    onStateChange?.(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
+    // No explicit updateState("loading") here - the initial useState above
+    // already is "loading", and this effect only ever runs once per mount
+    // (see the comment above the state declarations), so there's nothing
+    // to reset on a later re-run.
     getExerciseAudio(exerciseId, accessToken)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
+        updateState("idle");
       })
       .catch(() => {
-        if (!cancelled) setError("Couldn't load the audio.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) updateState("error");
       });
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseId, accessToken]);
 
-  if (loading) return <p className="text-sm text-slate-400">Loading audio…</p>;
-  if (error) return <p className="text-sm text-red-300">{error}</p>;
-  if (!audioUrl) return null;
-  return <audio controls autoPlay src={audioUrl} className="w-full" />;
+  async function handleListen() {
+    const el = audioRef.current;
+    if (!el || state === "loading") return;
+    el.currentTime = 0;
+    el.playbackRate = 1.0;
+    try {
+      await el.play();
+      setHasPlayedOnce(true);
+      updateState("playing");
+    } catch {
+      updateState("error");
+    }
+  }
+
+  if (state === "loading") {
+    return <p className="text-sm text-slate-400">Loading audio…</p>;
+  }
+  if (state === "error" && !audioUrl) {
+    return <p className="text-sm text-red-300">Couldn&apos;t load the audio. Please try again.</p>;
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={handleListen}
+        aria-label={hasPlayedOnce ? "Replay audio" : "Listen to audio"}
+        className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-100 transition-colors duration-standard hover:border-cyan-600 hover:text-cyan-300"
+      >
+        {hasPlayedOnce ? "↺ Replay" : "▶ Listen"}
+      </button>
+      {state === "error" && (
+        <p className="text-sm text-red-300" role="status">
+          Couldn&apos;t play audio - please try again.
+        </p>
+      )}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          className="hidden"
+          onEnded={() => updateState("idle")}
+          onError={() => updateState("error")}
+        />
+      )}
+    </div>
+  );
 }
 
 export type MatchPair = { left_option_id: string; right_option_id: string };

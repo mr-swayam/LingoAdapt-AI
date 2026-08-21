@@ -19,3 +19,31 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* V2 Premium UI redesign - design tokens. The existing slate/cyan palette
+ * (undocumented but already consistent across 30+ files) is kept as-is;
+ * these are additive tokens for the gaps the audit found, not a repaint. */
+@theme {
+  /* Distinct gold, separate from the amber already used for warnings/admin
+   * - design.md §2: "warm gold for important achievement/progress
+   * highlights". Reusing amber for both meanings was the audit's finding;
+   * this gives achievements/streaks their own hue instead. */
+  --color-gold-300: #f6d992;
+  --color-gold-400: #eec065;
+  --color-gold-500: #e0a72e;
+  --color-gold-600: #b9861c;
+  --color-gold-950: #2e2205;
+
+  /* Named after design.md §12's three motion-intent buckets rather than
+   * bare millisecond utilities, so a transition's intent reads in the
+   * class name (duration-standard) instead of being a magic number. */
+  --duration-micro: 200ms;
+  --duration-standard: 300ms;
+  --duration-large: 500ms;
+
+  /* Sparse, deliberate glow accents (design.md: "minimal glow", "controlled
+   * gradients") - used only on the dashboard hero card and achievement/
+   * streak highlights, not applied broadly. */
+  --shadow-glow-cyan: 0 0 32px -8px rgb(34 211 238 / 0.35);
+  --shadow-glow-gold: 0 0 32px -8px rgb(224 167 46 / 0.4);
+}

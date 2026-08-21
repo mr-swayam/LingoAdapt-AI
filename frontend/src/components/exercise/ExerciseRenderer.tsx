@@ -1,7 +1,9 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 
+import { Mascot, type MascotState } from "@/components/mascot/Mascot";
 import { PrimaryButton, TextInput } from "@/components/ui/form";
 import type { Exercise, ExerciseFeedback, SubmittedAnswer } from "@/types/course";
 
@@ -14,7 +16,7 @@ import {
   TextAnswer,
   WordOrderAnswer,
 } from "./AnswerInputs";
-import type { MatchPair } from "./AnswerInputs";
+import type { ListeningPlayerState, MatchPair } from "./AnswerInputs";
 import { FeedbackPanel } from "./FeedbackPanel";
 
 /** Remount (via `key={exercise.id}` from the caller) whenever the exercise
@@ -40,8 +42,19 @@ export function ExerciseRenderer({
   const [text, setText] = useState("");
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
   const [pairs, setPairs] = useState<MatchPair[]>([]);
+  const [listeningPlayerState, setListeningPlayerState] = useState<ListeningPlayerState>("loading");
+  const reduceMotion = useReducedMotion();
 
   const answered = result !== null;
+
+  function listeningMascotState(): MascotState {
+    if (result) return result.is_correct ? "happy" : "encouraging";
+    if (submitting) return "thinking";
+    if (listeningPlayerState === "playing") return "speaking";
+    if (listeningPlayerState === "loading") return "thinking";
+    if (text.trim().length > 0) return "listening";
+    return "idle";
+  }
 
   function buildAnswer(): SubmittedAnswer | null {
     switch (exercise.type) {
@@ -86,14 +99,21 @@ export function ExerciseRenderer({
         <ShortAnswerInput value={text} onChange={setText} disabled={answered} />
       )}
       {exercise.type === "LISTENING" && (
-        <div className="flex flex-col gap-4">
-          <ListeningAudioPlayer exerciseId={exercise.id} accessToken={accessToken} />
+        <div className="flex flex-col items-center gap-4">
+          <Mascot state={listeningMascotState()} />
+          <p className="text-sm font-medium text-slate-300">Listen carefully and type what you hear</p>
+          <ListeningAudioPlayer
+            exerciseId={exercise.id}
+            accessToken={accessToken}
+            onStateChange={setListeningPlayerState}
+          />
           <TextInput
             autoFocus
             disabled={answered}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Type what you heard"
+            className="w-full"
           />
         </div>
       )}
@@ -122,7 +142,17 @@ export function ExerciseRenderer({
         />
       )}
 
-      {result && <FeedbackPanel exercise={exercise} result={result} />}
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            initial={reduceMotion ? undefined : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+          >
+            <FeedbackPanel exercise={exercise} result={result} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {answered ? (
         <PrimaryButton onClick={onContinue}>Continue</PrimaryButton>

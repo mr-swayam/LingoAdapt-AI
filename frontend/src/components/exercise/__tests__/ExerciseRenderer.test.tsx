@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ExerciseRenderer } from "@/components/exercise/ExerciseRenderer";
+import * as courseApi from "@/lib/course-api";
 import type { AnswerResult, Exercise } from "@/types/course";
+
+vi.mock("@/lib/course-api");
 
 const multipleChoice: Exercise = {
   id: "ex-1",
@@ -28,6 +31,14 @@ const shortAnswer: Exercise = {
   id: "ex-3",
   type: "SHORT_ANSWER",
   prompt: "Introduce yourself in one sentence.",
+  payload: {},
+  options: [],
+};
+
+const listening: Exercise = {
+  id: "ex-4",
+  type: "LISTENING",
+  prompt: "Listen to the audio and type what you hear.",
   payload: {},
   options: [],
 };
@@ -168,5 +179,94 @@ describe("ExerciseRenderer - SHORT_ANSWER", () => {
       screen.getByText("My name is Anna and I am from Spain."),
     ).toBeInTheDocument();
     expect(screen.getByText("Missing a verb.")).toBeInTheDocument();
+  });
+});
+
+describe("ExerciseRenderer - LISTENING", () => {
+  function listeningResult(overrides: Partial<AnswerResult["correct_answer"]> & { is_correct: boolean }): AnswerResult {
+    const { is_correct, ...correct_answer } = overrides;
+    return {
+      is_correct,
+      correct_answer,
+      explanation: null,
+      lesson_completed: false,
+      correct_count: is_correct ? 1 : 0,
+      total_count: 1,
+      xp_earned: is_correct ? 10 : 0,
+      current_streak: null,
+      new_achievements: [],
+    };
+  }
+
+  it("shows the instruction text and a mascot before any audio has loaded", () => {
+    vi.mocked(courseApi.getExerciseAudio).mockResolvedValue(new Blob());
+    render(
+      <ExerciseRenderer
+        exercise={listening}
+        result={null}
+        submitting={false}
+        accessToken="token"
+        onSubmitAudio={vi.fn()}
+        onSubmit={vi.fn()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Listen carefully and type what you hear")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /tutor mascot/i })).toBeInTheDocument();
+  });
+
+  it("shows a 'Perfect!' headline and word chips for an EXACT match", () => {
+    const result = listeningResult({
+      is_correct: true,
+      category: "EXACT",
+      expected_sentence: "I would like a glass of water, please.",
+      words_correct: ["i", "would", "like", "a", "glass", "of", "water", "please"],
+      words_missing: [],
+      words_incorrect: [],
+      explanation: "Perfect - exactly right!",
+    });
+    vi.mocked(courseApi.getExerciseAudio).mockResolvedValue(new Blob());
+    render(
+      <ExerciseRenderer
+        exercise={listening}
+        result={result}
+        submitting={false}
+        accessToken="token"
+        onSubmitAudio={vi.fn()}
+        onSubmit={vi.fn()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Perfect!")).toBeInTheDocument();
+    expect(screen.getByText("glass")).toBeInTheDocument();
+  });
+
+  it("shows a 'Partially correct' headline and missing-word chips for a PARTIAL answer", () => {
+    const result = listeningResult({
+      is_correct: false,
+      category: "PARTIAL",
+      expected_sentence: "I would like a glass of water, please.",
+      words_correct: ["i", "would", "like", "a", "glass"],
+      words_missing: ["of", "water", "please"],
+      words_incorrect: [],
+      explanation: "Partially correct - missed \"of water please\".",
+    });
+    vi.mocked(courseApi.getExerciseAudio).mockResolvedValue(new Blob());
+    render(
+      <ExerciseRenderer
+        exercise={listening}
+        result={result}
+        submitting={false}
+        accessToken="token"
+        onSubmitAudio={vi.fn()}
+        onSubmit={vi.fn()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Partially correct")).toBeInTheDocument();
+    expect(screen.getByText("water")).toBeInTheDocument();
   });
 });

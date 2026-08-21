@@ -24,7 +24,10 @@ import string
 CORRECT_THRESHOLD = 0.9
 
 
-def _normalize_words(text: str) -> list[str]:
+def normalize_words(text: str) -> list[str]:
+    """Public: also reused by listening_evaluation.py, which needs the same
+    casefold/punctuation-stripped word list this module already builds for
+    SPEAKING transcripts."""
     stripped = text.translate(str.maketrans("", "", string.punctuation))
     return [w for w in re.split(r"\s+", stripped.strip().casefold()) if w]
 
@@ -33,8 +36,8 @@ def similarity_ratio(expected: str, transcript: str) -> float:
     """Word-level similarity, 0-1. Tolerant of STT noise (missing/extra
     punctuation, minor filler) that would fail an exact-match comparison,
     while still catching real word-level mistakes."""
-    expected_words = _normalize_words(expected)
-    transcript_words = _normalize_words(transcript)
+    expected_words = normalize_words(expected)
+    transcript_words = normalize_words(transcript)
     if not expected_words:
         return 0.0
     return difflib.SequenceMatcher(None, expected_words, transcript_words).ratio()
@@ -50,8 +53,8 @@ def describe_difference(expected: str, transcript: str) -> str:
     """Short, factual, non-fabricated feedback: which words differed. No
     phonetic advice - that would require a real pronunciation model this
     stack doesn't have."""
-    expected_words = _normalize_words(expected)
-    transcript_words = _normalize_words(transcript)
+    expected_words = normalize_words(expected)
+    transcript_words = normalize_words(transcript)
 
     if not transcript_words:
         return "We didn't hear anything - try recording again."

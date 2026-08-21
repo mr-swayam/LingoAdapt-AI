@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ExerciseRenderer } from "@/components/exercise/ExerciseRenderer";
+import { ExerciseTransition } from "@/components/exercise/ExerciseTransition";
+import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import {
   ApiError,
@@ -12,7 +17,21 @@ import {
   submitPracticeAnswerAudio,
 } from "@/lib/practice-api";
 import type { ExerciseFeedback, SubmittedAnswer } from "@/types/course";
-import type { PracticeStartResponse } from "@/types/practice";
+import type { PracticeReason, PracticeStartResponse } from "@/types/practice";
+
+/** Real "why was this recommended" reasoning, built entirely from
+ * PracticeReason's fields (backend: recommendation.SkillCandidate,
+ * previously computed then discarded before reaching the API - see
+ * V2_PREMIUM_UI_AUDIT.md §8). Never a hardcoded or invented string. */
+function reasonLabel(reason: PracticeReason): string {
+  if (reason.is_review_due) return `${reason.skill_name} is due for review`;
+  if (reason.recent_incorrect_count > 0) {
+    return `You've missed ${reason.skill_name} ${reason.recent_incorrect_count} time${
+      reason.recent_incorrect_count === 1 ? "" : "s"
+    } recently`;
+  }
+  return `${reason.skill_name} is your weakest skill (${Math.round(reason.mastery)}% mastery)`;
+}
 
 export default function PracticePage() {
   const { status, accessToken } = useRequireAuth();
@@ -50,9 +69,11 @@ export default function PracticePage() {
 
   if (status !== "authenticated") {
     return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <h1 className="sr-only">Practice</h1>
-        <p className="text-slate-400">Loading…</p>
+      <div className="flex flex-1 flex-col items-center px-6 py-12">
+        <div className="w-full max-w-xl">
+          <h1 className="sr-only">Practice</h1>
+          <SkeletonCard />
+        </div>
       </div>
     );
   }
@@ -61,43 +82,45 @@ export default function PracticePage() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <h1 className="sr-only">Practice</h1>
-        <p className="text-red-300">{error}</p>
-        <Link href="/dashboard" className="text-sm text-cyan-400 hover:text-cyan-300">
-          ← Back to dashboard
-        </Link>
+        <ErrorState description={error} />
       </div>
     );
   }
 
   if (!session) {
     return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <h1 className="sr-only">Practice</h1>
-        <p className="text-slate-400">Building your practice set…</p>
+      <div className="flex flex-1 flex-col items-center px-6 py-12">
+        <div className="w-full max-w-xl">
+          <h1 className="sr-only">Practice</h1>
+          <SkeletonCard />
+        </div>
       </div>
     );
   }
 
   if (session.total_count === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <h1 className="sr-only">Practice</h1>
-        <p className="text-slate-300">Nothing to practice yet.</p>
-        <p className="text-sm text-slate-400">
-          Complete a lesson first - practice picks questions from skills you&apos;ve already
-          started learning.
-        </p>
-        <Link
-          href="/learn"
-          className="rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition-colors hover:bg-cyan-400"
-        >
-          Go to lessons
-        </Link>
+        <EmptyState
+          title="Nothing to practice yet"
+          description="Complete a lesson first - practice picks questions from skills you've already started learning."
+          action={
+            <Link
+              href="/learn"
+              className="rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition-colors duration-standard hover:bg-cyan-400"
+            >
+              Go to lessons
+            </Link>
+          }
+        />
       </div>
     );
   }
 
   const isComplete = currentIndex >= session.exercises.length;
+  const currentExercise = !isComplete ? session.exercises[currentIndex] : null;
+  const currentReason = currentExercise ? session.reasons[currentExercise.id] : undefined;
 
   async function handleSubmit(answer: SubmittedAnswer) {
     if (!session || !accessToken) return;
@@ -151,13 +174,13 @@ export default function PracticePage() {
       <div className="w-full max-w-xl">
         {!isComplete && <h1 className="sr-only">Practice</h1>}
         {!isComplete && (
-          <div className="mb-8 flex items-center gap-4">
+          <div className="mb-6 flex items-center gap-4">
             <Link href="/dashboard" className="text-slate-400 hover:text-slate-300">
               ✕
             </Link>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
               <div
-                className="h-full rounded-full bg-cyan-500 transition-all"
+                className="h-full rounded-full bg-cyan-500 transition-all duration-standard"
                 style={{ width: `${(currentIndex / session.exercises.length) * 100}%` }}
               />
             </div>
@@ -167,22 +190,30 @@ export default function PracticePage() {
           </div>
         )}
 
+        {!isComplete && currentReason && (
+          <p className="mb-4 rounded-lg border border-cyan-900/60 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-300">
+            Recommended: {reasonLabel(currentReason)}
+          </p>
+        )}
+
         {error && <p className="mb-4 text-sm text-red-300">{error}</p>}
 
-        {isComplete ? (
-          <PracticeCompleteScreen correctCount={progress.correct} totalCount={progress.total} />
-        ) : (
-          <ExerciseRenderer
-            key={session.exercises[currentIndex].id}
-            exercise={session.exercises[currentIndex]}
-            result={currentResult}
-            submitting={submitting}
-            accessToken={accessToken ?? ""}
-            onSubmit={handleSubmit}
-            onSubmitAudio={handleSubmitAudio}
-            onContinue={handleContinue}
-          />
-        )}
+        <ExerciseTransition transitionKey={String(currentIndex)}>
+          {isComplete ? (
+            <PracticeCompleteScreen correctCount={progress.correct} totalCount={progress.total} />
+          ) : (
+            <ExerciseRenderer
+              key={session.exercises[currentIndex].id}
+              exercise={session.exercises[currentIndex]}
+              result={currentResult}
+              submitting={submitting}
+              accessToken={accessToken ?? ""}
+              onSubmit={handleSubmit}
+              onSubmitAudio={handleSubmitAudio}
+              onContinue={handleContinue}
+            />
+          )}
+        </ExerciseTransition>
       </div>
     </div>
   );
@@ -196,17 +227,17 @@ function PracticeCompleteScreen({
   totalCount: number;
 }) {
   return (
-    <div className="flex flex-col items-center gap-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center">
+    <Card variant="hero" padding="lg" className="flex flex-col items-center gap-6 text-center">
       <h1 className="text-2xl font-semibold text-slate-50">Practice complete! 💪</h1>
       <p className="text-lg text-slate-200">
         {correctCount} / {totalCount} correct
       </p>
       <Link
         href="/dashboard"
-        className="rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition-colors hover:bg-cyan-400"
+        className="rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition-colors duration-standard hover:bg-cyan-400"
       >
         Back to dashboard
       </Link>
-    </div>
+    </Card>
   );
 }

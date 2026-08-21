@@ -117,6 +117,32 @@ def get_practice_completion_stats(db: Session, *, since: datetime) -> tuple[int,
     return int(started), int(completed or 0)
 
 
+# --- V2 redesign: same stats, scoped to one learner (for the real
+# learner-facing Progress page - see V2_PREMIUM_UI_AUDIT.md §11) ---
+
+
+def get_lesson_completion_stats_for_user(
+    db: Session, *, user_id: uuid.UUID, since: datetime
+) -> tuple[int, int]:
+    stmt = select(
+        func.count(),
+        func.sum(case((LessonAttempt.status == LessonAttemptStatus.COMPLETED, 1), else_=0)),
+    ).where(LessonAttempt.user_id == user_id, LessonAttempt.started_at >= since)
+    started, completed = db.execute(stmt).one()
+    return int(started), int(completed or 0)
+
+
+def get_practice_completion_stats_for_user(
+    db: Session, *, user_id: uuid.UUID, since: datetime
+) -> tuple[int, int]:
+    stmt = select(
+        func.count(),
+        func.sum(case((PracticeSession.status == PracticeSessionStatus.COMPLETED, 1), else_=0)),
+    ).where(PracticeSession.user_id == user_id, PracticeSession.started_at >= since)
+    started, completed = db.execute(stmt).one()
+    return int(started), int(completed or 0)
+
+
 # --- Retention ---
 
 
@@ -205,6 +231,32 @@ def get_weekly_correctness_trend(
             func.count(),
             func.sum(case((LearningEvent.is_correct.is_(True), 1), else_=0)),
         ).where(LearningEvent.created_at >= start, LearningEvent.created_at < end)
+        total, correct = db.execute(stmt).one()
+        results.append((week_start, int(correct or 0), int(total or 0)))
+    return results
+
+
+def get_weekly_correctness_trend_for_user(
+    db: Session, *, user_id: uuid.UUID, num_weeks: int, end_day: date
+) -> list[tuple[date, int, int]]:
+    """Same as get_weekly_correctness_trend, scoped to one learner - real
+    accuracy-over-time, derived from the append-only LearningEvent log
+    (SkillMastery is a snapshot only and has no history, so a mastery-over-
+    time chart isn't backed by real data; this is offered instead)."""
+    current_week_start = end_day - timedelta(days=end_day.weekday())
+    results = []
+    for i in range(num_weeks):
+        week_start = current_week_start - timedelta(weeks=(num_weeks - 1 - i))
+        start, _ = _utc_day_bounds(week_start)
+        _, end = _utc_day_bounds(week_start + timedelta(days=6))
+        stmt = select(
+            func.count(),
+            func.sum(case((LearningEvent.is_correct.is_(True), 1), else_=0)),
+        ).where(
+            LearningEvent.user_id == user_id,
+            LearningEvent.created_at >= start,
+            LearningEvent.created_at < end,
+        )
         total, correct = db.execute(stmt).one()
         results.append((week_start, int(correct or 0), int(total or 0)))
     return results

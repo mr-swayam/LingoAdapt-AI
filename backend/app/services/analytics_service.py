@@ -18,6 +18,7 @@ RETENTION_REFERENCE_OFFSET_DAYS = 1  # "yesterday" - today's data is still parti
 IMPROVEMENT_TREND_WEEKS = 8
 TOP_MISTAKES_LIMIT = 5
 WEAKEST_SKILLS_LIMIT = 5
+LEARNER_ACTIVITY_TREND_WEEKS = 8
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,51 @@ class AnalyticsOverview:
     top_mistakes: list[MistakeTypeCount]
     weakest_skills: list[WeakestSkill]
     improvement_trend: list[WeeklyCorrectnessPoint]
+
+
+@dataclass(frozen=True)
+class LearnerActivity:
+    """V2 redesign: the same real, already-proven aggregation techniques
+    above, scoped to one learner instead of the whole platform - for the
+    learner-facing Progress page (see V2_PREMIUM_UI_AUDIT.md §11).
+    Deliberately does NOT include retention (not a coherent single-user
+    metric) or a mastery-over-time series (SkillMastery has no history,
+    only a current snapshot - see get_weekly_correctness_trend_for_user's
+    docstring)."""
+
+    lesson_completion: CompletionStats
+    practice_completion: CompletionStats
+    accuracy_trend: list[WeeklyCorrectnessPoint]
+
+
+def get_learner_activity(db: Session, *, user_id: uuid.UUID, days: int) -> LearnerActivity:
+    now = datetime.now(UTC)
+    today = now.date()
+    since_day = today - timedelta(days=days - 1)
+    since_dt = datetime.combine(since_day, datetime.min.time(), tzinfo=UTC)
+
+    lesson_started, lesson_completed = analytics_repository.get_lesson_completion_stats_for_user(
+        db, user_id=user_id, since=since_dt
+    )
+    practice_started, practice_completed = (
+        analytics_repository.get_practice_completion_stats_for_user(
+            db, user_id=user_id, since=since_dt
+        )
+    )
+    trend = analytics_repository.get_weekly_correctness_trend_for_user(
+        db, user_id=user_id, num_weeks=LEARNER_ACTIVITY_TREND_WEEKS, end_day=today
+    )
+
+    return LearnerActivity(
+        lesson_completion=CompletionStats(started=lesson_started, completed=lesson_completed),
+        practice_completion=CompletionStats(
+            started=practice_started, completed=practice_completed
+        ),
+        accuracy_trend=[
+            WeeklyCorrectnessPoint(week_start=week_start.isoformat(), correct=correct, total=total)
+            for week_start, correct, total in trend
+        ],
+    )
 
 
 def get_overview(db: Session, *, days: int) -> AnalyticsOverview:

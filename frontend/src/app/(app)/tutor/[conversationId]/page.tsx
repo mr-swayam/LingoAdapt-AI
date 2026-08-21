@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { motion, useReducedMotion } from "framer-motion";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 
 import { PrimaryButton, TextArea } from "@/components/ui/form";
+import { SkeletonText } from "@/components/ui/Skeleton";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { SCENARIO_ICONS, SCENARIO_LABELS } from "@/lib/scenario-labels";
@@ -109,8 +111,10 @@ export default function TutorConversationPage({
 
   if (status !== "authenticated") {
     return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <p className="text-slate-400">Loading…</p>
+      <div className="flex flex-1 flex-col items-center px-6 py-8">
+        <div className="w-full max-w-2xl">
+          <SkeletonText lines={4} />
+        </div>
       </div>
     );
   }
@@ -159,7 +163,7 @@ export default function TutorConversationPage({
         {recorder.error && <p className="mb-3 text-sm text-red-300">{recorder.error}</p>}
 
         {loading ? (
-          <p className="text-sm text-slate-400">Loading conversation…</p>
+          <SkeletonText lines={4} />
         ) : (
           <div className="flex flex-1 flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
             <div className="flex flex-1 flex-col gap-3 overflow-y-auto">
@@ -182,8 +186,11 @@ export default function TutorConversationPage({
               ))}
               {sending && (
                 <div className="flex justify-start">
-                  <div className="rounded-2xl rounded-bl-sm bg-slate-800 px-4 py-2 text-sm text-slate-400">
-                    {recorder.state === "recorded" ? "Transcribing…" : "Typing…"}
+                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-slate-800 px-4 py-2.5 text-sm text-slate-400">
+                    <TypingDots />
+                    <span className="sr-only">
+                      {recorder.state === "recorded" ? "Transcribing" : "Tutor is typing"}
+                    </span>
                   </div>
                 </div>
               )}
@@ -245,6 +252,26 @@ export default function TutorConversationPage({
   );
 }
 
+/** Replaces the previous static "Typing…"/"Transcribing…" text with an
+ * animated indicator - design.md §9 calls for one explicitly. The actual
+ * status is still conveyed to screen readers via the sr-only text next to
+ * this in the caller; these dots are decorative only. */
+function TypingDots() {
+  const reduceMotion = useReducedMotion();
+  return (
+    <span className="flex gap-1" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="h-1.5 w-1.5 rounded-full bg-slate-400"
+          animate={reduceMotion ? { opacity: 0.6 } : { opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+        />
+      ))}
+    </span>
+  );
+}
+
 function RecordingPreview({
   audioBlob,
   sending,
@@ -274,7 +301,13 @@ function RecordingPreview({
   );
 }
 
-function MessageBubble({
+type AudioState = "idle" | "loading" | "playing" | "paused" | "error";
+
+/** Text is always shown regardless of this state - voice playback is
+ * strictly additive, so any audio failure here must never hide or block
+ * the reply text above it. Exported (rather than a page-local function) so
+ * its play/pause/replay/error state machine can be unit-tested directly. */
+export function MessageBubble({
   message,
   conversationId,
   accessToken,
@@ -285,39 +318,100 @@ function MessageBubble({
 }) {
   const isLearner = message.role === "LEARNER";
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [loadingAudio, setLoadingAudio] = useState(false);
+  const [audioState, setAudioState] = useState<AudioState>("idle");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
+      abortRef.current?.abort();
       if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
   }, [audioUrl]);
 
-  async function handlePlay() {
-    if (audioUrl || loadingAudio) return;
-    setLoadingAudio(true);
+  async function handlePlayPause() {
+    if (audioState === "playing") {
+      audioRef.current?.pause();
+      setAudioState("paused");
+      return;
+    }
+    if (audioState === "paused" && audioRef.current) {
+      try {
+        await audioRef.current.play();
+        setAudioState("playing");
+      } catch {
+        setAudioState("error");
+      }
+      return;
+    }
+    if (audioState === "loading") return; // in-flight fetch already covers this click
+
+    setAudioState("loading");
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const blob = await getMessageAudio(conversationId, message.id, accessToken);
-      setAudioUrl(URL.createObjectURL(blob));
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+      // Wait a tick for the <audio> element to mount with the new src.
+      requestAnimationFrame(async () => {
+        const el = audioRef.current;
+        if (!el) return;
+        el.playbackRate = 1.0; // sensible, explicit default - never sped up/slowed silently
+        try {
+          await el.play();
+          setAudioState("playing");
+        } catch {
+          // Browser/device blocked programmatic playback (autoplay policy) -
+          // the user can still press play again via the native control, or
+          // just keep reading the text, which is already visible above.
+          setAudioState("error");
+        }
+      });
     } catch {
-      // Playback is a nice-to-have on top of the text reply - fail silently.
-    } finally {
-      setLoadingAudio(false);
+      if (!controller.signal.aborted) setAudioState("error");
     }
   }
+
+  function handleReplay() {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = 0;
+    el.play().then(
+      () => setAudioState("playing"),
+      () => setAudioState("error"),
+    );
+  }
+
+  const canReplay = audioUrl !== null && audioState !== "loading";
 
   return (
     <div className={`flex items-end gap-2 ${isLearner ? "justify-end" : "justify-start"}`}>
       {!isLearner && (
-        <button
-          type="button"
-          onClick={handlePlay}
-          disabled={loadingAudio}
-          title="Listen"
-          className="shrink-0 rounded-full border border-slate-700 p-1.5 text-xs text-slate-400 transition-colors hover:border-cyan-600 hover:text-cyan-300 disabled:opacity-50"
-        >
-          {loadingAudio ? "…" : "🔊"}
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={handlePlayPause}
+            disabled={audioState === "loading"}
+            aria-label={audioState === "playing" ? "Pause tutor reply audio" : "Play tutor reply audio"}
+            title={audioState === "playing" ? "Pause" : "Listen"}
+            className="rounded-full border border-slate-700 p-1.5 text-xs text-slate-400 transition-colors hover:border-cyan-600 hover:text-cyan-300 disabled:opacity-50"
+          >
+            {audioState === "loading" ? "…" : audioState === "playing" ? "⏸" : "🔊"}
+          </button>
+          {canReplay && (
+            <button
+              type="button"
+              onClick={handleReplay}
+              aria-label="Replay tutor reply audio"
+              title="Replay"
+              className="rounded-full border border-slate-700 p-1.5 text-xs text-slate-400 transition-colors hover:border-cyan-600 hover:text-cyan-300"
+            >
+              ↺
+            </button>
+          )}
+        </div>
       )}
       <div
         className={
@@ -329,7 +423,21 @@ function MessageBubble({
       >
         {message.content}
       </div>
-      {audioUrl && <audio controls autoPlay src={audioUrl} className="h-8 max-w-[140px]" />}
+      {audioState === "error" && (
+        <p className="text-xs text-red-300" role="status">
+          Couldn&apos;t play audio - you can still read the reply.
+        </p>
+      )}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          className="hidden"
+          onPause={() => setAudioState((s) => (s === "playing" ? "paused" : s))}
+          onEnded={() => setAudioState("paused")}
+          onError={() => setAudioState("error")}
+        />
+      )}
     </div>
   );
 }

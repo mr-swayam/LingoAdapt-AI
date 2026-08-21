@@ -12,7 +12,7 @@ not an AI opinion.
 import uuid
 
 from app.models.course import Exercise, ExerciseOption, ExerciseType
-from app.services import pronunciation
+from app.services import listening_evaluation, pronunciation
 
 
 class GradingError(ValueError):
@@ -24,8 +24,10 @@ def grade_exercise(exercise: Exercise, submitted_answer: dict) -> tuple[bool, di
     match exercise.type:
         case ExerciseType.MULTIPLE_CHOICE:
             return _grade_multiple_choice(exercise, submitted_answer)
-        case ExerciseType.FILL_BLANK | ExerciseType.TRANSLATION | ExerciseType.LISTENING:
+        case ExerciseType.FILL_BLANK | ExerciseType.TRANSLATION:
             return _grade_text(exercise, submitted_answer)
+        case ExerciseType.LISTENING:
+            return _grade_listening(exercise, submitted_answer)
         case ExerciseType.WORD_ORDER:
             return _grade_word_order(exercise, submitted_answer)
         case ExerciseType.MATCHING:
@@ -78,6 +80,36 @@ def _grade_text(exercise: Exercise, submitted_answer: dict) -> tuple[bool, dict]
     submitted_normalized = _normalize_text(submitted_answer["text"])
     is_correct = any(_normalize_text(ans) == submitted_normalized for ans in accepted_answers)
     return is_correct, {"answers": accepted_answers}
+
+
+def _grade_listening(exercise: Exercise, submitted_answer: dict) -> tuple[bool, dict]:
+    """Unlike FILL_BLANK/TRANSLATION's plain exact-match, LISTENING gets a
+    richer deterministic evaluation (app.services.listening_evaluation) -
+    the typed answer is compared word-by-word against the accepted
+    answer(s), not just checked for equality, so feedback can show exactly
+    which words were heard correctly."""
+    if "text" not in submitted_answer or not isinstance(submitted_answer["text"], str):
+        raise GradingError("this exercise requires a string 'text' answer")
+
+    submitted = submitted_answer["text"]
+    accepted_answers: list[str] = exercise.correct_answer.get("answers", [])
+
+    best_answer = max(
+        accepted_answers,
+        key=lambda ans: pronunciation.similarity_ratio(ans, submitted),
+        default="",
+    )
+    evaluation = listening_evaluation.classify_listening_answer(best_answer, submitted)
+
+    return evaluation.is_correct, {
+        "answers": accepted_answers,
+        "category": evaluation.category.value,
+        "expected_sentence": evaluation.expected_sentence,
+        "words_correct": evaluation.words_correct,
+        "words_missing": evaluation.words_missing,
+        "words_incorrect": evaluation.words_incorrect,
+        "explanation": evaluation.explanation,
+    }
 
 
 def _grade_word_order(exercise: Exercise, submitted_answer: dict) -> tuple[bool, dict]:

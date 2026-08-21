@@ -14,8 +14,8 @@ export function listCourses(): Promise<CourseSummary[]> {
   return apiRequest("/courses");
 }
 
-export function getCourse(courseId: string): Promise<CourseDetail> {
-  return apiRequest(`/courses/${courseId}`);
+export function getCourse(courseId: string, accessToken: string): Promise<CourseDetail> {
+  return apiRequest(`/courses/${courseId}`, { accessToken });
 }
 
 export function startLesson(lessonId: string, accessToken: string): Promise<LessonStartResponse> {

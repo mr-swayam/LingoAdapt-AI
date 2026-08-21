@@ -339,3 +339,66 @@ def test_answering_someone_elses_practice_session_is_forbidden(
 def test_practice_start_requires_authentication(client: TestClient) -> None:
     response = client.post("/api/v1/practice/start")
     assert response.status_code == 401
+
+
+def test_practice_reasons_reflect_real_mastery_and_skill_name(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_multi_skill_course(db_session)
+    token = _signup_and_get_token(client)
+    user_id = _user_id(client, token)
+
+    # SKILL_A: barely practiced (low mastery, weak). SKILL_B: heavily
+    # practiced (high mastery, strong) - the reason for each exercise must
+    # reflect this real difference, not a placeholder.
+    _practice_n_times(
+        db_session,
+        user_id=user_id,
+        exercise_id=fixture.exercise_ids["SKILL_A"][0],
+        is_correct=True,
+        times=1,
+    )
+    _practice_n_times(
+        db_session,
+        user_id=user_id,
+        exercise_id=fixture.exercise_ids["SKILL_B"][0],
+        is_correct=True,
+        times=20,
+    )
+
+    body = client.post("/api/v1/practice/start", headers=_auth_headers(token)).json()
+
+    skill_a_ids = {str(x) for x in fixture.exercise_ids["SKILL_A"]}
+    skill_b_ids = {str(x) for x in fixture.exercise_ids["SKILL_B"]}
+    skill_a_exercise = next(ex for ex in body["exercises"] if ex["id"] in skill_a_ids)
+    skill_b_exercise = next(ex for ex in body["exercises"] if ex["id"] in skill_b_ids)
+    reason_a = body["reasons"][skill_a_exercise["id"]]
+    reason_b = body["reasons"][skill_b_exercise["id"]]
+
+    assert reason_a["skill_name"]
+    assert reason_b["skill_name"]
+    assert reason_a["skill_name"] != reason_b["skill_name"]
+    assert reason_a["mastery"] < reason_b["mastery"]
+
+
+def test_practice_reasons_are_present_when_resuming_an_in_progress_session(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_multi_skill_course(db_session)
+    token = _signup_and_get_token(client)
+    user_id = _user_id(client, token)
+    _practice_n_times(
+        db_session,
+        user_id=user_id,
+        exercise_id=fixture.exercise_ids["SKILL_A"][0],
+        is_correct=True,
+        times=1,
+    )
+
+    client.post("/api/v1/practice/start", headers=_auth_headers(token))
+    second = client.post("/api/v1/practice/start", headers=_auth_headers(token)).json()
+
+    assert second["reasons"], "resumed session must still carry real reasons, not an empty map"
+    for exercise in second["exercises"]:
+        assert exercise["id"] in second["reasons"]
+        assert second["reasons"][exercise["id"]]["skill_name"]

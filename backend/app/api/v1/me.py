@@ -7,11 +7,14 @@ from app.api.deps import get_current_user
 from app.core.db import get_db
 from app.models.user import User
 from app.repositories import evaluation_repository, learner_model_repository, user_repository
+from app.schemas.analytics import LearnerActivityOut
 from app.schemas.auth import PreferencesOut, PreferencesUpdate, UserOut
 from app.schemas.evaluation import DetectedErrorOut
 from app.schemas.gamification import ProgressOut, QuestOut
 from app.schemas.mastery import ReviewItemOut, SkillMasteryOut
-from app.services import progress_service, quest_service
+from app.services import analytics_service, progress_service, quest_service
+
+DEFAULT_ACTIVITY_WINDOW_DAYS = 30
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -44,6 +47,20 @@ def get_my_review_queue(
         db, user_id=current_user.id, now=datetime.now(UTC)
     )
     return [ReviewItemOut.from_model(row) for row in rows]
+
+
+@router.get("/activity", response_model=LearnerActivityOut)
+def get_my_activity(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> LearnerActivityOut:
+    """Real, learner-scoped analytics for the redesigned Progress page -
+    lesson/practice completion and an 8-week accuracy trend, reusing the
+    same UTC-safe aggregation techniques as the admin analytics dashboard
+    (analytics_service.get_overview), scoped to this user."""
+    activity = analytics_service.get_learner_activity(
+        db, user_id=current_user.id, days=DEFAULT_ACTIVITY_WINDOW_DAYS
+    )
+    return LearnerActivityOut.from_activity(activity)
 
 
 @router.get("/errors", response_model=list[DetectedErrorOut])

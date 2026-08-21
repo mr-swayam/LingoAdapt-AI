@@ -95,22 +95,58 @@ def _build_candidates(db: Session, user_id: uuid.UUID, now: datetime) -> list[Sk
     return candidates
 
 
+def _reason_for_exercise(
+    db: Session, *, user_id: uuid.UUID, exercise: Exercise, now: datetime
+) -> SkillCandidate:
+    """Recomputes the same real signals _build_candidates uses for
+    ranking, scoped to one already-selected exercise's skill - used for
+    the "why recommended" reason on a resumed (already in-progress)
+    session, where the original ranking pass already happened and wasn't
+    persisted (nothing here is stored/replayed from a snapshot; it's a
+    fresh, current read, same as a brand-new session would compute)."""
+    mastery_row = learner_model_repository.get_skill_mastery(
+        db, user_id=user_id, skill_id=exercise.skill_id
+    )
+    mastery = mastery_row.mastery if mastery_row else 0.0
+    is_review_due = bool(
+        mastery_row and mastery_row.next_review_at is not None and mastery_row.next_review_at <= now
+    )
+    recent_incorrect = learner_model_repository.count_recent_incorrect(
+        db, user_id=user_id, skill_id=exercise.skill_id
+    )
+    return SkillCandidate(
+        skill_id=exercise.skill_id,
+        mastery=mastery,
+        is_review_due=is_review_due,
+        recent_incorrect_count=recent_incorrect,
+    )
+
+
 def start_practice_session(
     db: Session, *, user_id: uuid.UUID, limit: int = DEFAULT_SESSION_SIZE
-) -> tuple[PracticeSession, list[Exercise]]:
+) -> tuple[PracticeSession, list[Exercise], dict[uuid.UUID, SkillCandidate]]:
+    now = datetime.now(UTC)
+
     existing = practice_repository.get_in_progress_session(db, user_id)
     if existing is not None:
-        exercises = [
-            course_repository.get_exercise(db, q.exercise_id) for q in existing.questions
-        ]
-        return existing, [ex for ex in exercises if ex is not None]
+        resumed_exercises: list[Exercise] = []
+        resumed_reasons: dict[uuid.UUID, SkillCandidate] = {}
+        for question in existing.questions:
+            exercise = course_repository.get_exercise(db, question.exercise_id)
+            if exercise is None:
+                continue
+            resumed_exercises.append(exercise)
+            resumed_reasons[exercise.id] = _reason_for_exercise(
+                db, user_id=user_id, exercise=exercise, now=now
+            )
+        return existing, resumed_exercises, resumed_reasons
 
-    now = datetime.now(UTC)
     candidates = _build_candidates(db, user_id, now)
     top_skills = rank_skills(candidates, limit=limit)
 
     session = practice_repository.create_session(db, user_id=user_id)
     selected_exercises: list[Exercise] = []
+    reasons: dict[uuid.UUID, SkillCandidate] = {}
     for position, candidate in enumerate(top_skills, start=1):
         exercise = _select_exercise_for_skill(
             db,
@@ -124,6 +160,7 @@ def start_practice_session(
             db, session_id=session.id, exercise_id=exercise.id, position=position
         )
         selected_exercises.append(exercise)
+        reasons[exercise.id] = candidate
 
     session.total_count = len(selected_exercises)
     if session.total_count == 0:
@@ -131,7 +168,7 @@ def start_practice_session(
         session.completed_at = now
     db.commit()
 
-    return session, selected_exercises
+    return session, selected_exercises, reasons
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ export type LessonSummary = {
   title: string;
   position: number;
   exercise_count: number;
+  completed: boolean;
 };
 
 export type Unit = {

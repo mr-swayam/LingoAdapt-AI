@@ -288,4 +288,145 @@ def test_correct_listening_dictation_via_json_answer_endpoint(
         },
     )
     assert response.status_code == 200
-    assert response.json()["is_correct"] is True
+    body = response.json()
+    assert body["is_correct"] is True
+    assert body["correct_answer"]["category"] == "EXACT"
+
+
+def test_listening_answer_with_normalization_only_difference_is_correct(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": "i would like a glass of water please"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_correct"] is True
+    assert body["correct_answer"]["category"] == "NORMALIZED"
+
+
+def test_listening_answer_with_minor_typo_is_still_correct_with_word_feedback(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": "I would like a glas of water, please."},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_correct"] is True
+    assert body["correct_answer"]["category"] == "MINOR_ERROR"
+    assert "glass" in body["correct_answer"]["words_missing"]
+    assert "glas" in body["correct_answer"]["words_incorrect"]
+
+
+def test_listening_partial_answer_is_incorrect_with_category(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": "I would like a glass"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_correct"] is False
+    assert body["correct_answer"]["category"] == "PARTIAL"
+    assert "water" in body["correct_answer"]["words_missing"]
+
+
+def test_listening_major_error_answer_is_incorrect(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": "yesterday I go to school"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_correct"] is False
+    assert body["correct_answer"]["category"] == "MAJOR_ERROR"
+
+
+def test_listening_empty_answer_is_incorrect(client: TestClient, db_session: Session) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": ""},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_correct"] is False
+    assert body["correct_answer"]["category"] == "INCORRECT"
+
+
+def test_correct_listening_answer_updates_mastery(
+    client: TestClient, db_session: Session
+) -> None:
+    fixture = build_speaking_listening_lesson(db_session)
+    token = _signup_and_get_token(client)
+    start = client.post(
+        f"/api/v1/lessons/{fixture.lesson_id}/start", headers=_auth_headers(token)
+    ).json()
+
+    response = client.post(
+        f"/api/v1/exercises/{fixture.listening_exercise_id}/answer",
+        headers=_auth_headers(token),
+        json={
+            "lesson_attempt_id": start["lesson_attempt_id"],
+            "submitted_answer": {"text": "I would like a glass of water, please."},
+        },
+    )
+    assert response.status_code == 200
+
+    mastery = client.get("/api/v1/me/mastery", headers=_auth_headers(token)).json()
+    assert mastery[0]["mastery"] == 8.0  # same EMA formula as every other exercise type

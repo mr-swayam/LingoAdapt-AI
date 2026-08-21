@@ -15,14 +15,28 @@ class LessonSummaryOut(BaseModel):
     title: str
     position: int
     exercise_count: int
+    # V2 redesign: real per-learner completion, for the /learn path visual.
+    # No "locked" state is exposed here - the backend doesn't enforce or
+    # track lesson-unlock prerequisites (start_lesson has no such check),
+    # so a locked/unlocked visual would be fabricated. Only completed vs.
+    # not-completed is real.
+    completed: bool = False
 
     @classmethod
-    def from_model(cls, lesson: Lesson) -> "LessonSummaryOut":
+    def from_model(
+        cls, lesson: Lesson, *, completed_lesson_ids: frozenset[uuid.UUID] = frozenset()
+    ) -> "LessonSummaryOut":
+        # Default of "nothing completed" is correct for the callers that
+        # don't have a specific learner in view (admin authoring preview,
+        # the unauthenticated single-lesson lookup) - only
+        # CourseDetailOut.from_model (the learner-facing /courses/{id})
+        # passes a real per-user set.
         return cls(
             id=lesson.id,
             title=lesson.title,
             position=lesson.position,
             exercise_count=len(lesson.exercises),
+            completed=lesson.id in completed_lesson_ids,
         )
 
 
@@ -35,12 +49,17 @@ class UnitOut(BaseModel):
     lessons: list[LessonSummaryOut]
 
     @classmethod
-    def from_model(cls, unit: Unit) -> "UnitOut":
+    def from_model(
+        cls, unit: Unit, *, completed_lesson_ids: frozenset[uuid.UUID] = frozenset()
+    ) -> "UnitOut":
         return cls(
             id=unit.id,
             title=unit.title,
             position=unit.position,
-            lessons=[LessonSummaryOut.from_model(lesson) for lesson in unit.lessons],
+            lessons=[
+                LessonSummaryOut.from_model(lesson, completed_lesson_ids=completed_lesson_ids)
+                for lesson in unit.lessons
+            ],
         )
 
 
@@ -79,14 +98,19 @@ class CourseDetailOut(BaseModel):
     units: list[UnitOut]
 
     @classmethod
-    def from_model(cls, course: Course) -> "CourseDetailOut":
+    def from_model(
+        cls, course: Course, *, completed_lesson_ids: frozenset[uuid.UUID] = frozenset()
+    ) -> "CourseDetailOut":
         return cls(
             id=course.id,
             title=course.title,
             description=course.description,
             language_code=course.language.code,
             language_name=course.language.name,
-            units=[UnitOut.from_model(unit) for unit in course.units],
+            units=[
+                UnitOut.from_model(unit, completed_lesson_ids=completed_lesson_ids)
+                for unit in course.units
+            ],
         )
 
 

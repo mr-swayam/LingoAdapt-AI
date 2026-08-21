@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/ui/EmptyState";
+import { SkeletonText } from "@/components/ui/Skeleton";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { ApiError, getFriendsLeaderboard, getLeagueLeaderboard } from "@/lib/gamification-api";
 import { LEAGUE_TIER_ICONS, LEAGUE_TIER_LABELS } from "@/lib/league-labels";
@@ -16,8 +18,10 @@ export default function LeaderboardPage() {
 
   if (status !== "authenticated" || !accessToken) {
     return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <p className="text-slate-400">Loading…</p>
+      <div className="flex flex-1 flex-col items-center px-6 py-12">
+        <div className="w-full max-w-xl">
+          <SkeletonText lines={3} />
+        </div>
       </div>
     );
   }
@@ -25,12 +29,7 @@ export default function LeaderboardPage() {
   return (
     <div className="flex flex-1 flex-col items-center px-6 py-12">
       <div className="w-full max-w-xl">
-        <div className="mb-6 flex items-center gap-4">
-          <Link href="/dashboard" className="text-slate-400 hover:text-slate-300">
-            ←
-          </Link>
-          <h1 className="text-2xl font-semibold text-slate-50">Leaderboard</h1>
-        </div>
+        <h1 className="mb-6 text-2xl font-semibold text-slate-50">Leaderboard</h1>
 
         <div className="mb-6 flex gap-2">
           <button
@@ -115,7 +114,7 @@ function LeaderboardTabContent({ tab, accessToken }: { tab: Tab; accessToken: st
       {error && <p className="mb-4 text-sm text-red-300">{error}</p>}
 
       {loading ? (
-        <p className="text-sm text-slate-400">Loading…</p>
+        <SkeletonText lines={3} />
       ) : entries && entries.length > 0 ? (
         <div className="flex flex-col gap-2">
           {entries.map((entry) => (
@@ -139,9 +138,13 @@ function LeaderboardTabContent({ tab, accessToken }: { tab: Tab; accessToken: st
           ))}
         </div>
       ) : (
-        <p className="text-sm text-slate-400">
-          {tab === "friends" ? "Add friends to see how you compare this week." : "No one here yet."}
-        </p>
+        <EmptyState
+          icon="🏆"
+          title={tab === "friends" ? "No friends ranked yet" : "No one here yet"}
+          description={
+            tab === "friends" ? "Add friends to see how you compare this week." : undefined
+          }
+        />
       )}
 
       {tab === "friends" && (

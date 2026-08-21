@@ -45,8 +45,10 @@ def _handle_practice_service_error(exc: Exception) -> HTTPException:
 def start_practice(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> PracticeStartResponse:
-    session, exercises = practice_service.start_practice_session(db, user_id=current_user.id)
-    return PracticeStartResponse.build(session, exercises)
+    session, exercises, reasons = practice_service.start_practice_session(
+        db, user_id=current_user.id
+    )
+    return PracticeStartResponse.build(session, exercises, reasons)
 
 
 @router.post("/{session_id}/answer", response_model=PracticeAnswerResult)
